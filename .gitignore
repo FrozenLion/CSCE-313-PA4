@@ -1,0 +1,6 @@
+.idea/*
+BIMDC/*
+recv/*
+client
+server
+*.o
