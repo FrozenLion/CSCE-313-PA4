@@ -59,5 +59,8 @@ public:
         hists[patient-1]->update(value);
     }
 
+    bool is_empty(){
+        return hists.size() <= 0;
+    }
     
 };

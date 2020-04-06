@@ -8,7 +8,22 @@
 #include <mutex>
 #include <unistd.h>
 #include <cstdio>
+#include <signal.h>
+#include <time.h>
 using namespace std;
+
+//GLOBAL VARIABLES
+HistogramCollection hc;
+
+void sig_hdlr(int signo){
+    if(signo == SIGALRM){
+        system("clear");
+        if(!hc.is_empty()){
+            hc.print();
+            cout << endl;
+        }
+    }
+}
 
 void file_thread_function(string filename, int m, BoundedBuffer* reqbuf, FIFORequestChannel* chan){
     string rpsfname = "recv/" + filename;
@@ -102,6 +117,7 @@ FIFORequestChannel* create_channel(FIFORequestChannel* main){
     return newch;
 }
 
+//main function
 int main(int argc, char *argv[])
 {
     int n = 0;    //default number of requests per "patient"
@@ -114,8 +130,8 @@ int main(int argc, char *argv[])
     srand(time_t(NULL));
 
     int c;
-    while((c = getopt(argc, argv, ":c:n:p:w:b:m:f:")) != -1){
-        switch(c){
+    while((c = getopt(argc, argv, ":c:n:p:w:b:m:f:")) != -1) {
+        switch (c) {
             case 'n':
                 n = atoi(optarg);
                 break;
@@ -133,9 +149,9 @@ int main(int argc, char *argv[])
             case 'f':
                 filename = optarg;
                 break;
-            //is this needed??
+                //is this needed??
             case ':':
-                switch(optopt){
+                switch (optopt) {
                     case 'c':
                         //channel = true;
                         break;
@@ -152,7 +168,6 @@ int main(int argc, char *argv[])
 
 	FIFORequestChannel* chan = new FIFORequestChannel("control", FIFORequestChannel::CLIENT_SIDE);
     BoundedBuffer request_buffer(b);
-	HistogramCollection hc;
 
 	//setup the histograms
 	for(int i = 0; i < p; i++){
@@ -160,6 +175,29 @@ int main(int argc, char *argv[])
 	    Histogram* h = new Histogram(10, -2.0, 2.0);
 	    hc.add(h);
 	}
+
+
+    //set up signal handler
+    struct sigaction sa;
+    sa.sa_handler = sig_hdlr;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = SA_RESTART | SA_SIGINFO;
+
+    sigaction(SIGALRM, &sa, NULL);
+
+    //set up timer
+    timer_t timer;
+    struct sigevent sigev;
+    sigev.sigev_notify = SIGEV_SIGNAL;
+    sigev.sigev_signo = SIGALRM;
+    sigev.sigev_value.sival_ptr = &hc; //test this
+    timer_create(CLOCK_REALTIME, &sigev, &timer);
+    struct itimerspec its;
+    its.it_value.tv_sec = 2;
+    its.it_value.tv_nsec = 0;
+    its.it_interval.tv_sec = its.it_value.tv_sec;
+    its.it_interval.tv_nsec = its.it_value.tv_nsec;
+    timer_settime(timer, 0, &its, NULL);
 
 	//setup worker channels
 	FIFORequestChannel* wc [w];
