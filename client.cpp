@@ -14,13 +14,31 @@ using namespace std;
 
 //GLOBAL VARIABLES
 HistogramCollection hc;
+__int64_t iters;
+__int64_t progress;
 
 void sig_hdlr(int signo){
     if(signo == SIGALRM){
         system("clear");
         if(!hc.is_empty()){
             hc.print();
-            cout << endl;
+            cout << "\n\n\n\n" << endl;
+        }
+        if(iters > 0){
+            int pct = ((double)progress / (double)iters) * 100;
+
+            cout << "+----------------------------------------------------------------------------------------------------+" << endl;
+            cout << "|";
+            for(int i = 0; i < 100; i++){
+                if(i <= pct){
+                    cout << "#";
+                }
+                else{
+                    cout << " ";
+                }
+            }
+            cout << "|" << endl;
+            cout << "+----------------------------------------------------------------------------------------------------+" << endl;
         }
     }
 }
@@ -36,6 +54,7 @@ void file_thread_function(string filename, int m, BoundedBuffer* reqbuf, FIFOReq
 
     __int64_t flength;
     chan->cread(&flength, sizeof(flength));
+    cout << flength << endl;
 
     FILE* fptr = fopen(rpsfname.c_str(), "wb");
     if(fptr == NULL){
@@ -55,6 +74,7 @@ void file_thread_function(string filename, int m, BoundedBuffer* reqbuf, FIFOReq
         reqbuf->push(buf, sizeof(filemsg) + filename.size() + 1);
         fmsg->offset += fmsg->length;
         remlength -= fmsg->length;
+        iters++;
     }
 }
 
@@ -67,7 +87,7 @@ void patient_thread_function(int points, int patient, BoundedBuffer* reqbuf){
     }
 }
 
-void worker_thread_function(FIFORequestChannel* chan, BoundedBuffer* reqbuf, HistogramCollection* hc, int mem){
+void worker_thread_function(FIFORequestChannel* chan, BoundedBuffer* reqbuf, HistogramCollection* hc, int mem, mutex* m){
     char buf[1024];
     double rsp;
     bool running = true;
@@ -95,6 +115,10 @@ void worker_thread_function(FIFORequestChannel* chan, BoundedBuffer* reqbuf, His
                 fseek(fptr, fmsg->offset, SEEK_SET);
                 fwrite(rspbuf, 1, fmsg->length, fptr);
                 fclose(fptr);
+
+                m->lock();
+                progress++;
+                m->unlock();
                 break;
             }
 
@@ -126,6 +150,10 @@ int main(int argc, char *argv[])
     int b = 20; 	// default capacity of the request buffer, you should change this default
 	int m = MAX_MESSAGE; 	// default capacity of the message buffer
 	string filename = "";
+
+	//set globals
+	iters = 0;
+	progress = 0;
 
     srand(time_t(NULL));
 
@@ -221,18 +249,21 @@ int main(int argc, char *argv[])
         filethread = new thread(&file_thread_function, filename, m, &request_buffer, chan);
     }
 
+    mutex mtx;
     thread worker[w];
     for(int i = 0; i < w; i++){
-        worker[i] = thread(&worker_thread_function, wc[i], &request_buffer, &hc, m);
+        worker[i] = thread(&worker_thread_function, wc[i], &request_buffer, &hc, m, &mtx);
     }
 
 
 
 	/* Join all threads here */
-    for(int i = 0; i < p; i++){
-        patient[i].join();
+	if(n > 0 && (p > 0 || p <= 15) && w > 0) {
+        for (int i = 0; i < p; i++) {
+            patient[i].join();
+        }
+        cout << "Patient threads done" << endl;
     }
-    cout << "Patient threads done" << endl;
 
     if(filename.size() > 0) {
         filethread->join();
