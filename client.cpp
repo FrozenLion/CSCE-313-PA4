@@ -45,7 +45,7 @@ void sig_hdlr(int signo){
 
 void file_thread_function(string filename, int m, BoundedBuffer* reqbuf, FIFORequestChannel* chan){
     string rpsfname = "recv/" + filename;
-    char buf[1024];
+    char buf[m];
     filemsg msg(0, 0);
 
     memcpy(buf, &msg, sizeof(msg));
@@ -68,13 +68,13 @@ void file_thread_function(string filename, int m, BoundedBuffer* reqbuf, FIFOReq
 
     filemsg* fmsg = (filemsg*)buf;
     __int64_t remlength = flength;
+    iters = ceil((double)flength / (double)m);
 
     while(remlength > 0){
         fmsg->length = min(remlength, (__int64_t)m);
         reqbuf->push(buf, sizeof(filemsg) + filename.size() + 1);
         fmsg->offset += fmsg->length;
         remlength -= fmsg->length;
-        iters++;
     }
 }
 
@@ -88,13 +88,13 @@ void patient_thread_function(int points, int patient, BoundedBuffer* reqbuf){
 }
 
 void worker_thread_function(FIFORequestChannel* chan, BoundedBuffer* reqbuf, HistogramCollection* hc, int mem, mutex* m){
-    char buf[1024];
+    char buf[mem];
     double rsp;
     bool running = true;
     char rspbuf[mem];
 
     while(running){
-        int mSize = reqbuf->pop(buf, 1024);
+        int mSize = reqbuf->pop(buf, mem);
         MESSAGE_TYPE* msg = (MESSAGE_TYPE *)buf;
 
         switch (*msg){
@@ -158,7 +158,7 @@ int main(int argc, char *argv[])
     srand(time_t(NULL));
 
     int c;
-    while((c = getopt(argc, argv, ":c:n:p:w:b:m:f:")) != -1) {
+    while((c = getopt(argc, argv, "n:p:w:b:m:f:")) != -1) {
         switch (c) {
             case 'n':
                 n = atoi(optarg);
@@ -176,14 +176,6 @@ int main(int argc, char *argv[])
                 break;
             case 'f':
                 filename = optarg;
-                break;
-                //is this needed??
-            case ':':
-                switch (optopt) {
-                    case 'c':
-                        //channel = true;
-                        break;
-                }
                 break;
         }
     }
