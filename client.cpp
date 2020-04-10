@@ -10,7 +10,10 @@
 #include <cstdio>
 #include <signal.h>
 #include <time.h>
+
 using namespace std;
+
+#define DEBUG 0
 
 //GLOBAL VARIABLES
 HistogramCollection hc;
@@ -19,6 +22,7 @@ __int64_t progress;
 
 void sig_hdlr(int signo){
     if(signo == SIGALRM){
+#if !DEBUG
         system("clear");
         if(!hc.is_empty()){
             hc.print();
@@ -40,6 +44,7 @@ void sig_hdlr(int signo){
             cout << "|" << endl;
             cout << "+----------------------------------------------------------------------------------------------------+" << endl;
         }
+#endif
     }
 }
 
@@ -54,7 +59,6 @@ void file_thread_function(string filename, int m, BoundedBuffer* reqbuf, FIFOReq
 
     __int64_t flength;
     chan->cread(&flength, sizeof(flength));
-    cout << flength << endl;
 
     FILE* fptr = fopen(rpsfname.c_str(), "wb");
     if(fptr == NULL){
@@ -88,13 +92,13 @@ void patient_thread_function(int points, int patient, BoundedBuffer* reqbuf){
 }
 
 void worker_thread_function(FIFORequestChannel* chan, BoundedBuffer* reqbuf, HistogramCollection* hc, int mem, mutex* m){
-    char buf[mem];
+    char buf[1024];
     double rsp;
     bool running = true;
     char rspbuf[mem];
 
     while(running){
-        int mSize = reqbuf->pop(buf, mem);
+        int mSize = reqbuf->pop(buf, 1024);
         MESSAGE_TYPE* msg = (MESSAGE_TYPE *)buf;
 
         switch (*msg){
@@ -112,6 +116,15 @@ void worker_thread_function(FIFORequestChannel* chan, BoundedBuffer* reqbuf, His
 
                 string rspfname = "recv/" + filename;
                 FILE *fptr = fopen(rspfname.c_str(), "rb+");
+                if(fptr == NULL){
+                    cout << "error: " << strerror(errno) << endl;
+
+                    MESSAGE_TYPE qm = QUIT_MSG;
+                    chan->cwrite(&qm, sizeof(qm));
+                    running = false;
+                    break;
+                }
+
                 fseek(fptr, fmsg->offset, SEEK_SET);
                 fwrite(rspbuf, 1, fmsg->length, fptr);
                 fclose(fptr);
@@ -261,6 +274,7 @@ int main(int argc, char *argv[])
         filethread->join();
         cout << "File thread done" << endl;
     }
+    delete filethread;
 
     MESSAGE_TYPE q = QUIT_MSG;
     for(int i = 0; i < w; i++){
