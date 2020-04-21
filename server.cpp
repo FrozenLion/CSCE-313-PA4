@@ -13,7 +13,9 @@
 #include <vector>
 #include <math.h>
 #include <unistd.h>
+#include "RequestChannel.h"
 #include "FIFOreqchannel.h"
+#include "MQreqchannel.h"
 using namespace std;
 
 
@@ -23,19 +25,25 @@ char* buffer = NULL; // buffer used by the server, allocated in the main
 
 int nchannels = 0;
 pthread_mutex_t newchannel_lock;
-void handle_process_loop(FIFORequestChannel *_channel);
-char ival;
+void handle_process_loop(RequestChannel *_channel);
+string imsg = "f";
 vector<string> all_data [NUM_PERSONS];
 
 
-void process_newchannel_request (FIFORequestChannel *_channel){
+void process_newchannel_request (RequestChannel *_channel){
 	nchannels++;
 	string new_channel_name = "data" + to_string(nchannels) + "_";
 	char buf [30];
 	strcpy (buf, new_channel_name.c_str());
 	_channel->cwrite(buf, new_channel_name.size()+1);
 
-	FIFORequestChannel *data_channel = new FIFORequestChannel (new_channel_name, FIFORequestChannel::SERVER_SIDE);
+	RequestChannel *data_channel = NULL;
+	if(imsg.compare("f") == 0){
+	    data_channel = new FIFORequestChannel (new_channel_name, RequestChannel::SERVER_SIDE);
+	}
+	else if(imsg.compare("q") == 0){
+        data_channel = new MQRequestChannel (new_channel_name, RequestChannel::SERVER_SIDE, buffercapacity);
+	}
 	thread thread_for_client (handle_process_loop, data_channel);
 	thread_for_client.detach();
 }
@@ -73,7 +81,7 @@ double get_data_from_memory (int person, double seconds, int ecgno){
 		return ecg2;
 }
 
-void process_file_request (FIFORequestChannel* rc, char* request){
+void process_file_request (RequestChannel* rc, char* request){
 	
 	filemsg f = *(filemsg *) request;
 	string filename = request + sizeof (filemsg);
@@ -112,19 +120,19 @@ void process_file_request (FIFORequestChannel* rc, char* request){
 	fclose (fp);
 }
 
-void process_data_request (FIFORequestChannel* rc, char* request){
+void process_data_request (RequestChannel* rc, char* request){
 	datamsg* d = (datamsg* ) request;
 	double data = get_data_from_memory (d->person, d->seconds, d->ecgno);
 	rc->cwrite((char *) &data, sizeof (double));
 }
 
-void process_unknown_request(FIFORequestChannel *rc){
+void process_unknown_request(RequestChannel *rc){
 	char a = 0;
 	rc->cwrite (&a, sizeof (a));
 }
 
 
-int process_request(FIFORequestChannel *rc, char* _request)
+int process_request(RequestChannel *rc, char* _request)
 {
 	MESSAGE_TYPE m = *(MESSAGE_TYPE *) _request;
 	if (m == DATA_MSG){
@@ -140,7 +148,7 @@ int process_request(FIFORequestChannel *rc, char* _request)
 	}
 }
 
-void handle_process_loop(FIFORequestChannel *channel){
+void handle_process_loop(RequestChannel *channel){
 	/* creating a buffer per client to process incoming requests
 	and prepare a response */
 	char* buffer = new char [buffercapacity];
@@ -170,11 +178,14 @@ void handle_process_loop(FIFORequestChannel *channel){
 int main(int argc, char *argv[]){
 	buffercapacity = MAX_MESSAGE;
 	int opt;
-	while ((opt = getopt(argc, argv, "m:")) != -1) {
+	while ((opt = getopt(argc, argv, "m:i:")) != -1) {
 		switch (opt) {
 			case 'm':
 				buffercapacity = atoi (optarg);
 				break;
+		    case 'i':
+		        imsg = optarg;
+		        break;
 		}
 	}
 	srand(time_t(NULL));
@@ -182,7 +193,14 @@ int main(int argc, char *argv[]){
 		populate_file_data(i+1);
 	}
 	
-	FIFORequestChannel* control_channel = new FIFORequestChannel ("control", FIFORequestChannel::SERVER_SIDE);
+	RequestChannel* control_channel = NULL;
+	if(imsg.compare("f") == 0){
+	    control_channel = new FIFORequestChannel ("control", RequestChannel::SERVER_SIDE);
+	}
+	else if(imsg.compare("q") == 0){
+        control_channel = new MQRequestChannel ("control", RequestChannel::SERVER_SIDE, buffercapacity);
+	}
+
 	handle_process_loop (control_channel);
 	cout << "Server terminated" << endl;
 	delete control_channel;
