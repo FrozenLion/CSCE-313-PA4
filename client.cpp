@@ -5,6 +5,7 @@
 #include "HistogramCollection.h"
 #include "FIFOreqchannel.h"
 #include "MQreqchannel.h"
+#include "SHMreqchannel.h"
 #include <thread>
 #include <mutex>
 #include <unistd.h>
@@ -159,6 +160,9 @@ RequestChannel* create_channel(RequestChannel* main, string imsg, int m){
     else if(imsg.compare("q") == 0){
         newchan = new MQRequestChannel(name, RequestChannel::CLIENT_SIDE, m);
     }
+    else if(imsg.compare("s") == 0){
+        newchan = new SHMRequestChannel(name, RequestChannel::CLIENT_SIDE, m);
+    }
     return newchan;
 }
 
@@ -219,6 +223,10 @@ int main(int argc, char *argv[])
     else if(imsg.compare("q") == 0){
         chan = new MQRequestChannel("control", RequestChannel::CLIENT_SIDE, m);
     }
+    else if(imsg.compare("s") == 0){
+        chan = new SHMRequestChannel("control", RequestChannel::CLIENT_SIDE, m);
+    }
+
     BoundedBuffer request_buffer(b);
 
 	//setup the histograms
