@@ -3,20 +3,15 @@
 #define _FIFOreqchannel_H_
 
 #include "common.h"
+#include "RequestChannel.h"
 
-class FIFORequestChannel
+class FIFORequestChannel: public RequestChannel
 {
 public:
-	enum Side {SERVER_SIDE, CLIENT_SIDE};
 	enum Mode {READ_MODE, WRITE_MODE};
 	
 private:
 	/*  The current implementation uses named pipes. */
-	
-	
-	string my_name;
-	Side my_side;
-	
 	int wfd;
 	int rfd;
 	
@@ -57,8 +52,7 @@ public:
 	/* Writes msglen bytes from the msgbuf to the channel. The function returns the actual number of 
 	bytes written and that can be less than msglen (even 0) probably due to buffer limitation (e.g., the recepient
 	cannot accept msglen bytes due to its own buffer capacity. */
-	 
-	string name(); 
+
 };
 
 #endif

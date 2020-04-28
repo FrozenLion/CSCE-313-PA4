@@ -1,4 +1,5 @@
 #include "common.h"
+#include "RequestChannel.h"
 #include "FIFOreqchannel.h"
 using namespace std;
 
@@ -6,7 +7,7 @@ using namespace std;
 /* CONSTRUCTOR/DESTRUCTOR FOR CLASS   R e q u e s t C h a n n e l  */
 /*--------------------------------------------------------------------------*/
 
-FIFORequestChannel::FIFORequestChannel(const string _name, const Side _side) : my_name( _name), my_side(_side){
+FIFORequestChannel::FIFORequestChannel(const string _name, const Side _side) : RequestChannel(_name, _side){
 	pipe1 = "fifo_" + my_name + "1";
 	pipe2 = "fifo_" + my_name + "2";
 		

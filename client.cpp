@@ -4,6 +4,8 @@
 #include "common.h"
 #include "HistogramCollection.h"
 #include "FIFOreqchannel.h"
+#include "MQreqchannel.h"
+#include "SHMreqchannel.h"
 #include <thread>
 #include <mutex>
 #include <unistd.h>
@@ -13,7 +15,7 @@
 
 using namespace std;
 
-#define DEBUG 0
+#define DEBUG 1
 
 //GLOBAL VARIABLES
 HistogramCollection hc;
@@ -48,7 +50,7 @@ void sig_hdlr(int signo){
     }
 }
 
-void file_thread_function(string filename, int m, BoundedBuffer* reqbuf, FIFORequestChannel* chan){
+void file_thread_function(string filename, int m, BoundedBuffer* reqbuf, RequestChannel* chan){
     string rpsfname = "recv/" + filename;
     char buf[m];
     filemsg msg(0, 0);
@@ -91,7 +93,7 @@ void patient_thread_function(int points, int patient, BoundedBuffer* reqbuf){
     }
 }
 
-void worker_thread_function(FIFORequestChannel* chan, BoundedBuffer* reqbuf, HistogramCollection* hc, int mem, mutex* m){
+void worker_thread_function(RequestChannel* chan, BoundedBuffer* reqbuf, HistogramCollection* hc, int mem, mutex* m){
     char buf[1024];
     double rsp;
     bool running = true;
@@ -145,13 +147,23 @@ void worker_thread_function(FIFORequestChannel* chan, BoundedBuffer* reqbuf, His
 }
 
 //create new fifo channels for the threads to use
-FIFORequestChannel* create_channel(FIFORequestChannel* main){
+RequestChannel* create_channel(RequestChannel* main, string imsg, int m){
     char name [1024];
     MESSAGE_TYPE msg = NEWCHANNEL_MSG;
     main->cwrite((char*)&msg, sizeof(msg));
     main->cread(name, 1024);
-    FIFORequestChannel* newch = new FIFORequestChannel(name, FIFORequestChannel::CLIENT_SIDE);
-    return newch;
+
+    RequestChannel* newchan = NULL;
+    if(imsg.compare("f") == 0) {
+        newchan = new FIFORequestChannel(name, RequestChannel::CLIENT_SIDE);
+    }
+    else if(imsg.compare("q") == 0){
+        newchan = new MQRequestChannel(name, RequestChannel::CLIENT_SIDE, m);
+    }
+    else if(imsg.compare("s") == 0){
+        newchan = new SHMRequestChannel(name, RequestChannel::CLIENT_SIDE, m);
+    }
+    return newchan;
 }
 
 //main function
@@ -163,6 +175,7 @@ int main(int argc, char *argv[])
     int b = 20; 	// default capacity of the request buffer, you should change this default
 	int m = MAX_MESSAGE; 	// default capacity of the message buffer
 	string filename = "";
+	string imsg = "f";
 
 	//set globals
 	iters = 0;
@@ -171,7 +184,7 @@ int main(int argc, char *argv[])
     srand(time_t(NULL));
 
     int c;
-    while((c = getopt(argc, argv, "n:p:w:b:m:f:")) != -1) {
+    while((c = getopt(argc, argv, "n:p:w:b:m:f:i:")) != -1) {
         switch (c) {
             case 'n':
                 n = atoi(optarg);
@@ -184,11 +197,15 @@ int main(int argc, char *argv[])
                 break;
             case 'b':
                 b = atoi(optarg);
+                break;
             case 'm':
                 m = atoi(optarg);
                 break;
             case 'f':
                 filename = optarg;
+                break;
+            case 'i':
+                imsg = optarg;
                 break;
         }
     }
@@ -196,10 +213,20 @@ int main(int argc, char *argv[])
     int pid = fork();
     if (pid == 0){
 		string memtoa = to_string(m);
-        execl ("server", "server", "-m", (char*)memtoa.c_str(), (char *)NULL);
+        execl ("server", "server", "-m", (char*)memtoa.c_str(), "-i", imsg.c_str(), (char *)NULL);
     }
 
-	FIFORequestChannel* chan = new FIFORequestChannel("control", FIFORequestChannel::CLIENT_SIDE);
+    RequestChannel* chan;
+    if(imsg.compare("f") == 0) {
+        chan = new FIFORequestChannel("control", RequestChannel::CLIENT_SIDE);
+    }
+    else if(imsg.compare("q") == 0){
+        chan = new MQRequestChannel("control", RequestChannel::CLIENT_SIDE, m);
+    }
+    else if(imsg.compare("s") == 0){
+        chan = new SHMRequestChannel("control", RequestChannel::CLIENT_SIDE, m);
+    }
+
     BoundedBuffer request_buffer(b);
 
 	//setup the histograms
@@ -233,9 +260,9 @@ int main(int argc, char *argv[])
     timer_settime(timer, 0, &its, NULL);
 
 	//setup worker channels
-	FIFORequestChannel* wc [w];
+	RequestChannel* wc [w];
 	for(int i = 0; i < w; i++){
-        wc[i] = create_channel(chan);
+        wc[i] = create_channel(chan, imsg, m);
 	}
 
     struct timeval start, end;
