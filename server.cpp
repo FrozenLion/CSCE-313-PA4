@@ -17,6 +17,8 @@
 #include "FIFOreqchannel.h"
 #include "MQreqchannel.h"
 #include "SHMreqchannel.h"
+#include "TCPreqchannel.h"
+
 using namespace std;
 
 
@@ -47,6 +49,9 @@ void process_newchannel_request (RequestChannel *_channel){
 	}
     else if(imsg.compare("s") == 0){
         data_channel = new SHMRequestChannel(new_channel_name, RequestChannel::SERVER_SIDE, buffercapacity);
+    }
+    else if(imsg.compare("t") == 0){
+        cout << "received new channel message on server for TCP connection" << endl;
     }
 	thread thread_for_client (handle_process_loop, data_channel);
 	thread_for_client.detach();
@@ -182,7 +187,8 @@ void handle_process_loop(RequestChannel *channel){
 int main(int argc, char *argv[]){
 	buffercapacity = MAX_MESSAGE;
 	int opt;
-	while ((opt = getopt(argc, argv, "m:i:")) != -1) {
+	string port;
+	while ((opt = getopt(argc, argv, "m:i:r:")) != -1) {
 		switch (opt) {
 			case 'm':
 				buffercapacity = atoi (optarg);
@@ -190,8 +196,12 @@ int main(int argc, char *argv[]){
 		    case 'i':
 		        imsg = optarg;
 		        break;
+		    case 'r':
+		        port = optarg;
+		        break;
 		}
 	}
+	int count = 0;
 	srand(time_t(NULL));
 	for (int i=0; i<NUM_PERSONS; i++){
 		populate_file_data(i+1);
@@ -200,15 +210,34 @@ int main(int argc, char *argv[]){
 	RequestChannel* control_channel = NULL;
 	if(imsg.compare("f") == 0){
 	    control_channel = new FIFORequestChannel ("control", RequestChannel::SERVER_SIDE);
+        handle_process_loop (control_channel);
 	}
 	else if(imsg.compare("q") == 0){
         control_channel = new MQRequestChannel ("control", RequestChannel::SERVER_SIDE, buffercapacity);
+        handle_process_loop (control_channel);
 	}
     else if(imsg.compare("s") == 0){
         control_channel = new SHMRequestChannel("control", RequestChannel::SERVER_SIDE, buffercapacity);
+        handle_process_loop (control_channel);
+    }
+    else if(imsg.compare("t") == 0){
+        control_channel = new TCPRequestChannel("", port, RequestChannel::SERVER_SIDE);
+
+        while(1){ //main accept loop
+            sockaddr_storage their_addr;
+            socklen_t sin_size = sizeof their_addr;
+            int slave = accept(((TCPRequestChannel*)control_channel)->sockfd, (struct sockaddr*)&their_addr, &sin_size);
+            if(slave == -1){
+                perror("accept");
+                continue;
+            }
+            RequestChannel* slave_chan = new TCPRequestChannel(slave);
+
+            thread t(handle_process_loop, slave_chan);
+            t.detach();
+        }
     }
 
-	handle_process_loop (control_channel);
 	cout << "Server terminated" << endl;
 	delete control_channel;
 }
