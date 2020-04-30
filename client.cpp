@@ -6,6 +6,7 @@
 #include "FIFOreqchannel.h"
 #include "MQreqchannel.h"
 #include "SHMreqchannel.h"
+#include "TCPreqchannel.h"
 #include <thread>
 #include <mutex>
 #include <unistd.h>
@@ -15,16 +16,16 @@
 
 using namespace std;
 
-#define DEBUG 1
+#define REALTIME 0         //determines whether to display realtime progress updates of program or not
 
-//GLOBAL VARIABLES
+//GLOBAL VARIABLES (must be global for signal handler)
 HistogramCollection hc;
 __int64_t iters;
 __int64_t progress;
 
 void sig_hdlr(int signo){
     if(signo == SIGALRM){
-#if !DEBUG
+#if REALTIME
         system("clear");
         if(!hc.is_empty()){
             hc.print();
@@ -147,13 +148,18 @@ void worker_thread_function(RequestChannel* chan, BoundedBuffer* reqbuf, Histogr
 }
 
 //create new fifo channels for the threads to use
-RequestChannel* create_channel(RequestChannel* main, string imsg, int m){
+RequestChannel* create_channel(RequestChannel* main, string imsg, int m, string host, string port){
+    RequestChannel* newchan = NULL;
+    if(imsg.compare("t") == 0){
+        newchan = new TCPRequestChannel(host, port, RequestChannel::CLIENT_SIDE);
+        return newchan;
+    }
+
     char name [1024];
     MESSAGE_TYPE msg = NEWCHANNEL_MSG;
     main->cwrite((char*)&msg, sizeof(msg));
     main->cread(name, 1024);
 
-    RequestChannel* newchan = NULL;
     if(imsg.compare("f") == 0) {
         newchan = new FIFORequestChannel(name, RequestChannel::CLIENT_SIDE);
     }
@@ -169,6 +175,8 @@ RequestChannel* create_channel(RequestChannel* main, string imsg, int m){
 //main function
 int main(int argc, char *argv[])
 {
+    bool safety = false;
+
     int n = 0;    //default number of requests per "patient"
     int p = 0;     // number of patients [1,15]
     int w = 0;    //default number of worker threads
@@ -176,6 +184,8 @@ int main(int argc, char *argv[])
 	int m = MAX_MESSAGE; 	// default capacity of the message buffer
 	string filename = "";
 	string imsg = "f";
+	string host = "";
+	string port = "";
 
 	//set globals
 	iters = 0;
@@ -184,7 +194,7 @@ int main(int argc, char *argv[])
     srand(time_t(NULL));
 
     int c;
-    while((c = getopt(argc, argv, "n:p:w:b:m:f:i:")) != -1) {
+    while((c = getopt(argc, argv, "n:p:w:b:m:f:i:h:r:")) != -1) {
         switch (c) {
             case 'n':
                 n = atoi(optarg);
@@ -207,13 +217,21 @@ int main(int argc, char *argv[])
             case 'i':
                 imsg = optarg;
                 break;
+            case 'h':
+                host = optarg;
+                break;
+            case 'r':
+                port = optarg;
+                break;
         }
     }
 
-    int pid = fork();
-    if (pid == 0){
-		string memtoa = to_string(m);
-        execl ("server", "server", "-m", (char*)memtoa.c_str(), "-i", imsg.c_str(), (char *)NULL);
+    if(imsg.compare("t") != 0) {    //don't run the server for TCP connection
+        int pid = fork();
+        if (pid == 0) {
+            string memtoa = to_string(m);
+            execl("server", "server", "-m", (char *) memtoa.c_str(), "-i", imsg.c_str(), (char *) NULL);
+        }
     }
 
     RequestChannel* chan;
@@ -226,8 +244,11 @@ int main(int argc, char *argv[])
     else if(imsg.compare("s") == 0){
         chan = new SHMRequestChannel("control", RequestChannel::CLIENT_SIDE, m);
     }
+    else if(imsg.compare("t") == 0) {
+        chan = new TCPRequestChannel(host, port, RequestChannel::CLIENT_SIDE);
+    }
 
-    BoundedBuffer request_buffer(b);
+        BoundedBuffer request_buffer(b);
 
 	//setup the histograms
 	for(int i = 0; i < p; i++){
@@ -262,7 +283,7 @@ int main(int argc, char *argv[])
 	//setup worker channels
 	RequestChannel* wc [w];
 	for(int i = 0; i < w; i++){
-        wc[i] = create_channel(chan, imsg, m);
+        wc[i] = create_channel(chan, imsg, m, host, port);
 	}
 
     struct timeval start, end;
@@ -271,6 +292,7 @@ int main(int argc, char *argv[])
     /* Start all threads here */
     thread patient[p];
     if(n > 0 && (p > 0 || p <= 15) && w > 0) {
+        safety = true;
         for (int i = 0; i < p; i++) {
             patient[i] = thread(&patient_thread_function, n, i + 1, &request_buffer);
         }
@@ -278,12 +300,13 @@ int main(int argc, char *argv[])
 
     thread* filethread;
     if(filename.size() > 0 && w > 0) {
+        safety = true;
         filethread = new thread(&file_thread_function, filename, m, &request_buffer, chan);
     }
 
     mutex mtx;
     thread worker[w];
-    for(int i = 0; i < w; i++){
+    for(int i = 0; safety && i < w; i++){
         worker[i] = thread(&worker_thread_function, wc[i], &request_buffer, &hc, m, &mtx);
     }
 
@@ -308,7 +331,7 @@ int main(int argc, char *argv[])
         request_buffer.push((char*)&q, sizeof(q));
     }
 
-    for(int i = 0; i < w; i++){
+    for(int i = 0; safety && i < w; i++){
         worker[i].join();
     }
     cout << "Worker threads done" << endl;
