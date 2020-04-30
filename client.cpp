@@ -16,16 +16,16 @@
 
 using namespace std;
 
-#define DEBUG 1
+#define REALTIME 0         //determines whether to display realtime progress updates of program or not
 
-//GLOBAL VARIABLES
+//GLOBAL VARIABLES (must be global for signal handler)
 HistogramCollection hc;
 __int64_t iters;
 __int64_t progress;
 
 void sig_hdlr(int signo){
     if(signo == SIGALRM){
-#if !DEBUG
+#if REALTIME
         system("clear");
         if(!hc.is_empty()){
             hc.print();
@@ -175,6 +175,8 @@ RequestChannel* create_channel(RequestChannel* main, string imsg, int m, string 
 //main function
 int main(int argc, char *argv[])
 {
+    bool safety = false;
+
     int n = 0;    //default number of requests per "patient"
     int p = 0;     // number of patients [1,15]
     int w = 0;    //default number of worker threads
@@ -224,11 +226,13 @@ int main(int argc, char *argv[])
         }
     }
 
-//    int pid = fork();
-//    if (pid == 0){
-//		string memtoa = to_string(m);
-//        execl ("server", "server", "-m", (char*)memtoa.c_str(), "-i", imsg.c_str(), "-r", port, (char *)NULL);
-//    }
+    if(imsg.compare("t") != 0) {    //don't run the server for TCP connection
+        int pid = fork();
+        if (pid == 0) {
+            string memtoa = to_string(m);
+            execl("server", "server", "-m", (char *) memtoa.c_str(), "-i", imsg.c_str(), (char *) NULL);
+        }
+    }
 
     RequestChannel* chan;
     if(imsg.compare("f") == 0) {
@@ -288,6 +292,7 @@ int main(int argc, char *argv[])
     /* Start all threads here */
     thread patient[p];
     if(n > 0 && (p > 0 || p <= 15) && w > 0) {
+        safety = true;
         for (int i = 0; i < p; i++) {
             patient[i] = thread(&patient_thread_function, n, i + 1, &request_buffer);
         }
@@ -295,12 +300,13 @@ int main(int argc, char *argv[])
 
     thread* filethread;
     if(filename.size() > 0 && w > 0) {
+        safety = true;
         filethread = new thread(&file_thread_function, filename, m, &request_buffer, chan);
     }
 
     mutex mtx;
     thread worker[w];
-    for(int i = 0; i < w; i++){
+    for(int i = 0; safety && i < w; i++){
         worker[i] = thread(&worker_thread_function, wc[i], &request_buffer, &hc, m, &mtx);
     }
 
@@ -325,7 +331,7 @@ int main(int argc, char *argv[])
         request_buffer.push((char*)&q, sizeof(q));
     }
 
-    for(int i = 0; i < w; i++){
+    for(int i = 0; safety && i < w; i++){
         worker[i].join();
     }
     cout << "Worker threads done" << endl;
